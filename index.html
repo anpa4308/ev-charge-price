@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="build" content="2026-11-19-2">
 <meta name="theme-color" content="#f6f7f9" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#111418" media="(prefers-color-scheme: dark)">
 <title>전기차 충전 요금 비교</title>
@@ -91,9 +92,17 @@ td .price{margin-right:6px}
 .card h2{display:flex;justify-content:space-between;align-items:center}
 @media (max-width:760px){ .selrow{display:flex;gap:8px;width:100%} .selrow select{flex:1} }
 .selrow{display:flex;gap:8px;align-items:center}
+html,body{overscroll-behavior-y:none}
+#ptr{position:fixed;left:50%;top:0;z-index:50;display:flex;align-items:center;gap:8px;padding:8px 14px;border-radius:999px;background:var(--card);color:var(--fg);border:1px solid var(--line);box-shadow:0 4px 14px rgba(0,0,0,.12);font-size:13px;transform:translate(-50%,-60px);opacity:0;pointer-events:none;white-space:nowrap}
+#ptr.anim{transition:transform .2s,opacity .2s}
+#ptr .ic{display:inline-block;width:16px;height:16px;line-height:16px;text-align:center;transition:transform .15s}
+#ptr.ready .ic{transform:rotate(180deg)}
+#ptr.load .ic{border:2px solid var(--line);border-top-color:var(--fg);border-radius:50%;width:12px;height:12px;line-height:0;font-size:0;animation:ptrspin .7s linear infinite}
+@keyframes ptrspin{to{transform:rotate(360deg)}}
 </style>
 </head>
 <body>
+<div id="ptr" aria-live="polite"><span class="ic">↓</span><span class="tx">당겨서 새로고침</span></div>
 <div class="wrap">
 <h1>전기차 충전 요금 비교</h1>
 <p class="sub">사업자 회원가 vs 이음(기후에너지환경부 회원카드) 요금 · 원/kWh · 2026-11-19 확인</p>
@@ -193,6 +202,68 @@ if(hash && idxOf(hash)>=0) start=String(idxOf(hash));
 else { const last=LS.get('evp_last',''); if(last && idxOf(last)>=0) start=String(idxOf(last)); }
 buildSelect(start);
 render();
+
+/* ---- 새로고침: 항상 서버의 최신 버전을 받도록 주소에 매번 다른 값을 붙임 (localStorage는 그대로 유지) ---- */
+const BUILD=(document.querySelector('meta[name="build"]')||{}).content||'';
+function hardReload(){ location.replace(location.pathname+'?r='+Date.now()+location.hash); }
+try{ if(location.search) history.replaceState(null,'',location.pathname+location.hash); }catch(e){}
+
+// 열 때: 서버 버전 확인 후 다르면 최신으로 다시 불러옴 (같은 버전으로 반복 새로고침 방지)
+async function checkUpdate(){
+  try{
+    const t=await fetch(location.pathname+'?_='+Date.now(),{cache:'no-store'}).then(r=>r.text());
+    const m=t.match(/name="build" content="([^"]+)"/);
+    if(m && m[1]!==BUILD){
+      let tried=null; try{tried=sessionStorage.getItem('evp_upd')}catch(e){}
+      if(tried!==m[1]){ try{sessionStorage.setItem('evp_upd',m[1])}catch(e){} hardReload(); }
+    }
+  }catch(e){}
+}
+checkUpdate();
+
+// 다시 열 때(백그라운드 → 앞으로): 모바일이면 새로고침
+const isTouch=matchMedia('(pointer:coarse)').matches;
+let wasHidden=false;
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState==='hidden'){ wasHidden=true; return; }
+  if(wasHidden){ wasHidden=false; if(isTouch) hardReload(); else checkUpdate(); }
+});
+window.addEventListener('pageshow',e=>{ if(e.persisted){ if(isTouch) hardReload(); else checkUpdate(); } });
+
+// 당겨서 새로고침 (iOS·Android 공통)
+(function(){
+  const box=document.getElementById('ptr'), tx=box.querySelector('.tx'), TH=70, MAX=110;
+  let y0=null,x0=0,d=0,active=false,busy=false;
+  const top=()=> (window.scrollY||document.documentElement.scrollTop||0)<=0;
+  function show(dist){
+    box.classList.remove('anim');
+    box.style.transform=`translate(-50%,${dist-50}px)`; box.style.opacity=Math.min(1,dist/TH);
+    const ready=dist>=TH; box.classList.toggle('ready',ready); tx.textContent=ready?'놓으면 새로고침':'당겨서 새로고침';
+  }
+  function hide(){ box.classList.add('anim'); box.classList.remove('ready'); box.style.transform='translate(-50%,-60px)'; box.style.opacity=0; }
+  document.addEventListener('touchstart',e=>{
+    if(busy||e.touches.length!==1||!top()){ y0=null; return; }
+    y0=e.touches[0].clientY; x0=e.touches[0].clientX; d=0; active=false;
+  },{passive:true});
+  document.addEventListener('touchmove',e=>{
+    if(y0==null) return;
+    const dy=e.touches[0].clientY-y0, dx=e.touches[0].clientX-x0;
+    if(!active){
+      if(Math.abs(dx)>Math.abs(dy)||dy<=0||!top()){ if(Math.abs(dx)>8||dy<-8){y0=null} return; }
+      if(dy>8) active=true; else return;
+    }
+    if(e.cancelable) e.preventDefault();
+    d=Math.min(MAX,Math.max(0,dy*0.5)); show(d);
+  },{passive:false});
+  function end(){
+    if(y0==null) return; y0=null;
+    if(!active) return; active=false;
+    if(d>=TH){ busy=true; box.classList.add('anim','load'); box.classList.remove('ready'); box.style.transform='translate(-50%,16px)'; box.style.opacity=1; tx.textContent='새로고침 중…'; setTimeout(hardReload,150); }
+    else hide();
+  }
+  document.addEventListener('touchend',end,{passive:true});
+  document.addEventListener('touchcancel',()=>{y0=null;active=false;hide()},{passive:true});
+})();
 </script>
 </body>
 </html>
