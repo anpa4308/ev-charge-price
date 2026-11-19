@@ -82,6 +82,15 @@ td .price{margin-right:6px}
 .nmline{font-size:12.5px;color:var(--muted);margin-top:4px}
 .nmline b{color:var(--fg);font-weight:500}
 .empty{padding:10px 14px;color:var(--muted);font-size:13px}
+
+.favbtn{font:inherit;font-size:14px;border:1px solid var(--line);background:var(--card);color:var(--fg);border-radius:10px;padding:9px 12px;cursor:pointer;white-space:nowrap}
+.favbtn.on{color:#c98a00;border-color:#e8c25a}
+.favbtn[hidden]{display:none}
+.st{border:0;background:none;cursor:pointer;font-size:18px;line-height:1;padding:0 2px;color:var(--muted);vertical-align:-1px}
+.st.on{color:#e0a800}
+.card h2{display:flex;justify-content:space-between;align-items:center}
+@media (max-width:760px){ .selrow{display:flex;gap:8px;width:100%} .selrow select{flex:1} }
+.selrow{display:flex;gap:8px;align-items:center}
 </style>
 </head>
 <body>
@@ -89,7 +98,7 @@ td .price{margin-right:6px}
 <h1>전기차 충전 요금 비교</h1>
 <p class="sub">사업자 회원가 vs 이음(기후에너지환경부 회원카드) 요금 · 원/kWh · 2026-11-19 확인</p>
 <div class="bar">
-<select id="sel" aria-label="사업자 선택"></select>
+<div class="selrow"><select id="sel" aria-label="사업자 선택"></select><button id="favbtn" class="favbtn" type="button" hidden>☆ 즐겨찾기</button></div>
 <div class="legend"><span class="badge m">이음보다 저렴</span><span class="badge i">이음보다 비쌈</span><span class="badge e">이음과 동일</span></div>
 </div>
 <div class="tablebox"><table>
@@ -97,6 +106,7 @@ td .price{margin-right:6px}
 <tbody id="tb"></tbody></table></div>
 <div class="cards" id="cards"></div>
 <ul class="notes">
+<li>★를 누르면 즐겨찾기에 추가돼. 즐겨찾기한 사업자는 선택박스와 전체 목록 맨 위에 나와. 즐겨찾기와 마지막 선택은 이 브라우저에만 저장돼.</li>
 <li>배지는 그 사업자 회원가가 이음 요금보다 얼마나 싸거나 비싼지를 나타내.</li>
 <li>사업자 기본 요금은 무공해차 통합누리집 사업자별 요금 매트릭스, 그 아래 별도 요금은 각 사업자 공식 페이지 기준이야. 단가가 등재되지 않은 구간은 표시하지 않았어(표에서는 "-").</li>
 <li><span class="star">*</span> 표시 사업자(이지차저·파워큐브·E-pit)는 매트릭스와 회사 공식 페이지 숫자가 달라 회사 공식 페이지 숫자를 썼어.</li>
@@ -121,12 +131,26 @@ function nmText(nm){
   if(new Set(av).size===1) return fmt(av[0]);
   return nm.map(v=>v==null?'-':fmt(v)).join(' / ');
 }
-const sel=document.getElementById('sel'),tb=document.getElementById('tb'),cards=document.getElementById('cards');
-sel.innerHTML='<option value="">전체 사업자 보기 ('+DATA.length+'곳)</option>'+DATA.map((g,i)=>`<option value="${i}">${g.name}</option>`).join('');
+const sel=document.getElementById('sel'),tb=document.getElementById('tb'),cards=document.getElementById('cards'),favbtn=document.getElementById('favbtn');
+const LS={get(k,d){try{const v=localStorage.getItem(k);return v==null?d:JSON.parse(v)}catch(e){return d}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}};
+let favs=new Set(LS.get('evp_favs',[]).filter(n=>DATA.some(g=>g.name===n)));
+const idxOf=n=>DATA.findIndex(g=>g.name===n);
+const isFav=n=>favs.has(n);
+function ordered(){return [...DATA.filter(g=>isFav(g.name)),...DATA.filter(g=>!isFav(g.name))]}
+function buildSelect(cur){
+  const f=DATA.filter(g=>isFav(g.name)), o=DATA.filter(g=>!isFav(g.name));
+  let h='<option value="">전체 사업자 보기 ('+DATA.length+'곳)</option>';
+  if(f.length) h+='<optgroup label="★ 즐겨찾기">'+f.map(g=>`<option value="${idxOf(g.name)}">★ ${g.name}</option>`).join('')+'</optgroup><optgroup label="전체">';
+  h+=o.map(g=>`<option value="${idxOf(g.name)}">${g.name}</option>`).join('');
+  if(f.length) h+='</optgroup>';
+  sel.innerHTML=h; sel.value=cur;
+}
+const starBtn=n=>`<button class="st${isFav(n)?' on':''}" type="button" data-fav="${n}" aria-label="${n} 즐겨찾기${isFav(n)?' 해제':''}">${isFav(n)?'★':'☆'}</button>`;
+function toggleFav(n){ if(favs.has(n)) favs.delete(n); else favs.add(n); LS.set('evp_favs',[...favs]); const cur=sel.value; buildSelect(cur); render(false); }
 function renderTable(gs){
   let h='<tr class="ieum"><td class="op">이음 (기준)</td>'+IEUM.map(p=>`<td><span class="price">${fmt(p)}</span></td>`).join('')+'<td class="nm">295 / 307.2 / 325.6 / 348.4 / 393.1</td></tr>';
   for(const g of gs) g.rows.forEach((r,j)=>{
-    const first=j===0?`<td class="op">${g.name}${g.star?'<span class="star">*</span>':''}</td>`:`<td class="sublab">${r.label}</td>`;
+    const first=j===0?`<td class="op">${starBtn(g.name)} ${g.name}${g.star?'<span class="star">*</span>':''}</td>`:`<td class="sublab">${r.label}</td>`;
     h+=`<tr class="${j===0?'grpstart':''}">${first}${r.cells.map(c=>`<td>${cellTable(c)}</td>`).join('')}<td class="nm">${nmText(r.nm)}</td></tr>`;
   });
   tb.innerHTML=h;
@@ -134,7 +158,7 @@ function renderTable(gs){
 function renderCards(gs){
   let h='<div class="ieumcard"><h3>이음 요금 (기준)</h3><div class="ieumgrid">'+IEUM.map((p,i)=>`<div>${TIERS[i][0]}<br>${TIERS[i][1]}<b>${fmt(p)}</b></div>`).join('')+'</div></div>';
   for(const g of gs){
-    h+=`<section class="card"><h2>${g.name}${g.star?'<span class="star">*</span>':''}</h2>`;
+    h+=`<section class="card"><h2><span>${g.name}${g.star?'<span class="star">*</span>':''}</span>${starBtn(g.name)}</h2>`;
     for(const r of g.rows){
       let rows='';
       for(let i=0;i<5;i++){
@@ -153,14 +177,21 @@ function renderCards(gs){
   }
   cards.innerHTML=h;
 }
-function render(){
-  const v=sel.value; const gs=v===''?DATA:[DATA[+v]];
+function render(save=true){
+  const v=sel.value; const gs=v===''?ordered():[DATA[+v]];
   renderTable(gs); renderCards(gs);
-  try{history.replaceState(null,'',v===''?location.pathname:'#'+encodeURIComponent(DATA[+v].name))}catch(e){}
+  if(v===''){favbtn.hidden=true}else{const n=DATA[+v].name;favbtn.hidden=false;favbtn.classList.toggle('on',isFav(n));favbtn.textContent=isFav(n)?'★ 즐겨찾기 해제':'☆ 즐겨찾기'}
+  if(save) LS.set('evp_last',v===''?'':DATA[+v].name);
+  try{history.replaceState(null,'',location.pathname+(v===''?'':'#'+encodeURIComponent(DATA[+v].name)))}catch(e){}
 }
 sel.addEventListener('change',()=>{render();window.scrollTo({top:0})});
+favbtn.addEventListener('click',()=>{ if(sel.value!=='') toggleFav(DATA[+sel.value].name) });
+document.addEventListener('click',e=>{const b=e.target.closest('[data-fav]'); if(b) toggleFav(b.dataset.fav)});
+let start='';
 const hash=decodeURIComponent(location.hash.slice(1));
-if(hash){const i=DATA.findIndex(g=>g.name===hash); if(i>=0) sel.value=String(i);}
+if(hash && idxOf(hash)>=0) start=String(idxOf(hash));
+else { const last=LS.get('evp_last',''); if(last && idxOf(last)>=0) start=String(idxOf(last)); }
+buildSelect(start);
 render();
 </script>
 </body>
